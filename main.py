@@ -77,6 +77,7 @@ async def register_user(user_data: User):
 async def login_user(user: UserLogin):
     
     rest_api_url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword"
+    firebase_api_key = os.getenv("FIREBASE_API_KEY")
     payload = {
         "email": user.email,
         "password": user.password,
@@ -124,7 +125,7 @@ async def update_user_profile(profile_update: UserProfileUpdate):
     try:
         # Verify ID token using Firebase Auth API
         rest_api_url = "https://identitytoolkit.googleapis.com/v1/accounts:lookup"
-
+        firebase_api_key = os.getenv("FIREBASE_API_KEY")
         payload = {"idToken": profile_update.idtoken}
         response = requests.post(rest_api_url, params={"key": firebase_api_key}, json=payload)
 

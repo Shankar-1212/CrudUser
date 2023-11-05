@@ -32,6 +32,7 @@ class UserProfile(BaseModel):
     
 class UserProfileRetrieve(BaseModel):
     email: str
+    idtoken: str
 
 class UserProfileUpdate(BaseModel):
     email: str
@@ -98,19 +99,41 @@ async def retrieve_user_profile(profile: UserProfileRetrieve):
     """
     Retrieve user profile information.
     """
-    users_ref = db.collection('users')
-    query = users_ref.where('email', '==', profile.email).limit(1)
-    user_data = [doc.to_dict() for doc in query.stream()]
+    try:
+        # Verify ID token using Firebase Auth API
+        rest_api_url = "https://identitytoolkit.googleapis.com/v1/accounts:lookup"
+        firebase_api_key = os.getenv("FIREBASE_API_KEY")
+        payload = {"idToken": profile.idtoken}  # Changed from retrieve_user_profile.idtoken to profile.idtoken
+        response = requests.post(rest_api_url, params={"key": firebase_api_key}, json=payload)
 
-    if user_data:
-        profile_data = {
-            'email': user_data[0].get('email'),
-            'full_name': user_data[0].get('full_name'),
-            'username': user_data[0].get('username')
-        }
-        return profile_data
-    else:
-        raise HTTPException(status_code=404, detail="User profile not found")
+        if response.status_code == 200:
+            user_data = response.json().get('users')[0]  # Get the user data
+            user_id = user_data['localId']  # Get the user's ID from Firebase Auth
+
+            users_ref = db.collection('users')
+            query = users_ref.where('email', '==', profile.email).limit(1)
+            user_firestore = list(query.stream())  # Convert generator to a list for error handling
+
+            if user_firestore:
+                if user_firestore[0].id == user_id:
+                    user_data = user_firestore[0].to_dict()
+
+                    profile_data = {
+                        'email': user_data.get('email'),
+                        'full_name': user_data.get('full_name'),
+                        'username': user_data.get('username')
+                    }
+                    return profile_data
+                else:
+                    raise HTTPException(status_code=403, detail="Unauthorized: ID token doesn't match user")
+            else:
+                raise HTTPException(status_code=404, detail="User profile not found")
+        else:
+            raise HTTPException(status_code=401, detail="Invalid ID token")
+    except Exception as e:
+        logging.error(f"Error occurred: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Internal server error") 
 
 
 # Retrieve user profile endpoint
@@ -120,7 +143,7 @@ async def update_user_profile(profile_update: UserProfileUpdate):
     """
     Update user profile information.
     """
-    valid_keys = {"full_name", "username"}  # Valid keys for update
+    valid_keys = {"full_name", "username"}  # Only allow these keys to be updated
 
     try:
         # Verify ID token using Firebase Auth API
